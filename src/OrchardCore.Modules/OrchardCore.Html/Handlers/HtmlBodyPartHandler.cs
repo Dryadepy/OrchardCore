@@ -1,34 +1,58 @@
-using System.Linq;
+using System.Text.Encodings.Web;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Html;
 using OrchardCore.ContentManagement.Handlers;
-using OrchardCore.ContentManagement.Metadata;
 using OrchardCore.ContentManagement.Models;
 using OrchardCore.Html.Models;
-using OrchardCore.Html.Settings;
+using OrchardCore.Html.ViewModels;
+using OrchardCore.Liquid;
 
 namespace OrchardCore.Html.Handlers
 {
     public class HtmlBodyPartHandler : ContentPartHandler<HtmlBodyPart>
     {
-        private readonly IContentDefinitionManager _contentDefinitionManager;
+        private readonly ILiquidTemplateManager _liquidTemplateManager;
+        private readonly HtmlEncoder _htmlEncoder;
+        private HtmlString _bodyAspect;
+        private int _contentItemId;
 
-        public HtmlBodyPartHandler(IContentDefinitionManager contentDefinitionManager)
+        public HtmlBodyPartHandler(ILiquidTemplateManager liquidTemplateManager, HtmlEncoder htmlEncoder)
         {
-            _contentDefinitionManager = contentDefinitionManager;
+            _liquidTemplateManager = liquidTemplateManager;
+            _htmlEncoder = htmlEncoder;
         }
 
         public override Task GetContentItemAspectAsync(ContentItemAspectContext context, HtmlBodyPart part)
         {
-            return context.ForAsync<BodyAspect>(bodyAspect =>
+            return context.ForAsync<BodyAspect>(async bodyAspect =>
             {
-                var contentTypeDefinition = _contentDefinitionManager.GetTypeDefinition(part.ContentItem.ContentType);
-                var contentTypePartDefinition = contentTypeDefinition.Parts.FirstOrDefault(p => p.PartDefinition.Name == nameof(HtmlBodyPart));
-                var settings = contentTypePartDefinition.GetSettings<HtmlBodyPartSettings>();
-                var body = part.Html;
+                if (bodyAspect != null && part.ContentItem.Id == _contentItemId)
+                {
+                    bodyAspect.Body = _bodyAspect;
 
-                bodyAspect.Body = new HtmlString(body);
-                return Task.CompletedTask;
+                    return;
+                }
+
+                try
+                {
+                    var model = new HtmlBodyPartViewModel()
+                    {
+                        Html = part.Html,
+                        HtmlBodyPart = part,
+                        ContentItem = part.ContentItem
+                    };
+
+                    var result = await _liquidTemplateManager.RenderAsync(part.Html, _htmlEncoder, model,
+                        scope => scope.SetValue("ContentItem", model.ContentItem));
+
+                    bodyAspect.Body = _bodyAspect = new HtmlString(result);
+                    _contentItemId = part.ContentItem.Id;
+                }
+                catch
+                {
+                    bodyAspect.Body = HtmlString.Empty;
+                    _contentItemId = default;
+                }
             });
         }
     }
